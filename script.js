@@ -15,7 +15,6 @@
         PIECE_WHITE_COLOR: "#FFFFFF", // 白コマの色
     };
     Object.freeze( option );
-    const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
     /**
     * DOM内にリバーシ用の要素を作成
@@ -223,216 +222,36 @@
         return Object.freeze(obj);
     };
 
-    /**
-     * 盤面データの管理
-     * @param drawCtrl
-     */
-    const getGameDataManager = ( drawCtrl )=>{
+    window.addEventListener( "DOMContentLoaded" , ()=> {
+    	let player = PLAYER_YOU;
+        let busy = false;
+        let count = 0;
     
-        const pieceNum = option.BORD_PIECE_NUM;
+        const playerChange = () =>
+            player = (player === PLAYER_YOU ? PLAYER_COMP : PLAYER_YOU);
     
+        const gameScreen = makeGameBord( "reversi" );
+        const messageCtrl = getMessageControler( gameScreen.message );
+        const controlCtrl = getControlControler( gameScreen.control, ()=>alert("スタートボタンが押された") );
     
-            // ゲーム状況データ作成 横、縦の2次元配列
-        const data = Array.from({length:8},
-            e => new Array(pieceNum).fill(PLAYER_NONE) );
-    
-            // 指定位置(col , row)から指定方向(stepX , stepY)でコマがとれるかチェック
-        const checkPiece = ( col , row ,stepX , stepY , nowPlayer ) =>{
-            let x = col + stepX,y = row + stepY;
-            let firstPos = null;
-            let count = 0;
-    
-            while( true ){
-                if( x < 0 || x >= pieceNum || y < 0 || y >= pieceNum ) return false;
-                const stat = status(x,y);
-                if( stat === PLAYER_NONE ) return false;
-    
-                if( stat === nowPlayer )
-                    return firstPos === null ? false
-                        : [firstPos,[x-=stepX,y-=stepY],[stepX,stepY],count]; // 始点、終点、方向
-    
-                if( firstPos === null ) firstPos = [x,y];
-                count++;
-    
-                x += stepX;y += stepY;
-    
-            }
-        };
-    
-            // 指定位置の状況を取得
-        const status = ( col , row ) =>  data[row][col];
-        const statusSet = ( col , row ,val ) =>  data[row][col] = val;
-    
-            // 指定位置にコマを置けるかどうかチェック
-        const pointCheck = ( col , row , player , checkOnly = true) => {
-    
-            const piece = status( col , row );
-            if( piece !== PLAYER_NONE ) return false;
-            const nextPlayer = player === PLAYER_YOU ? PLAYER_COMP : PLAYER_YOU;
-            const result = [];
-    
-            return ( [[-1,-1],[0 , -1],[1 , -1],[1 , 0],[1 , 1],[0 , 1],[-1 , 1],[-1 , 0]]
-                    .some( e => {
-                        const range = checkPiece( col , row , e[0] , e[1] , player , nextPlayer );
-                        if( range !== false ){
-                            if( checkOnly ) return true;
-                            result.push(range);
-                        }
-                    })
-            ) ? true : ( result.length === 0 ? false : result );
-    
-        };
-    
-    
-    
-        return Object.freeze({
-                // ゲーム状況データのリセット
-            reset:()=>{data.forEach(e=>e.fill(PLAYER_NONE));drawCtrl.initBord()},
-                // コマの配置と描画
-            pieceSet:function( col , row , val ){
-                statusSet(col,row, val);
-                if( drawCtrl !== null ) drawCtrl.drawPiece( col , row , val );
-                return this;
-            },
-                // コマを置ける位置を検索
-            getFreePlaces: ( player ) => {
-                const result=[];
-                for( let row = 0 ; row < pieceNum ; row ++ ){
-                    for( let col = 0 ; col < pieceNum ; col ++ ){
-                        if( pointCheck( col , row , player ) !== false ) result.push( [col,row] );
-                    }
-                }
-                return result.length === 0 ? false : result;
-            },
-                // 現在の状況
-            result: ()=>{
-                let c1 = 0,c2 = 0,c3 = 0;
-                for( let row = 0 ; row < pieceNum ; row ++ ){
-                    for( let col = 0 ; col < pieceNum ; col ++ ){
-                        switch( status( col , row ) ){
-                            case PLAYER_NONE:c1++;break;
-                            case PLAYER_YOU:c2++;break;
-                            case PLAYER_COMP:c3++;break;
-                        }
-                    }
-                }
-                return [c1,c2,c3];
-            },
-                // 指定した位置にコマを置き、裏返し可能なものを処理
-            clickSets: async function( col , row , player,callBack){
-    
-                const range = pointCheck( col , row , player , false );
-                this.pieceSet( col , row , player);
-                if( range === false ) return;
-                for( let i = 0 ; i < range.length ; i ++ ){
-                    let [colp , rowp] = range[i][0];
-                    const [stX , stY] = range[i][2];
-                    const [endColp , endRowp] =
-                        [range[i][1][0] + stX , range[i][1][1] + stY];
-    
-                    while( colp !== endColp || rowp !== endRowp ){
-                        await wait(500);
-                        this.pieceSet( colp , rowp , player);
-                        callBack(this.result());
-                        colp += stX;rowp += stY;
-                    }
-                }
-                return this.result();
-            },
-                // 最弱思考ルーチン
-            compThink:()=>{
-                const free=[];
-                let res;
-    
-                for( let row = 0 ; row < pieceNum ; row ++ ){
-                    for( let col = 0 ; col < pieceNum ; col ++ ){
-                        if( (res = pointCheck( col , row , PLAYER_COMP , false )) !== false ) {
-                            const sum = res.reduce( (a,b)=>[ 0 , 0 , 0 , a[3] +b[3] ],[0,0,0,0])[3];
-                            free.push( [ col , row , res , sum ] );
-                        }
-                    }
-                }
-                if( free.length === 0 ) return false;
-                free.sort( (a,b)=>b[3]-a[3] );
-                for( let i = 0; i < free.length ; i ++ ){
-                    const [x,y] = free[i];
-                    if( (x === 0 && y === 0) ||  (x === 7 && y === 0)
-                        ||  (x === 0 && y === 7) ||  (x === 7 && y === 7) ) return [x,y];
-                }
-                return [ free[0][0] , free[0][1] ];
+        messageCtrl.turnMessage(player);
+        const drawCtrl = getMakeDrawingControler( gameScreen.bord.canvas,( pos )=>{
+            if( busy ) 
+                return;
+            drawCtrl.drawPiece( pos[0],pos[1],player );
+            playerChange();
+            if ( ++count > 5 ) {
+                busy = true;
+                messageCtrl.pass( player , ()=>{
+                    playerChange();
+                    count = 0;
+                    busy = false;
+                    messageCtrl.turnMessage( player );
+                });
+            } else {
+                messageCtrl.turnMessage( player );
             }
         });
-    };
-    
-    window.addEventListener( "DOMContentLoaded" , ()=> {
-        let player = PLAYER_YOU;
-        let passWait = false,running = false,clickSetsWait = false,thinkWait = false;
-        let freeSpace = null;
-    
-        const playerChange = () =>{
-            player = (player === PLAYER_YOU ? PLAYER_COMP : PLAYER_YOU);
-            messageCtrl.turnMessage( player );
-            freeSpace = gameData.getFreePlaces( player );
-            if( freeSpace === false ){  // 取れるコマがない
-                passWait = true;
-                messageCtrl.pass( player , ()=>{
-                    passWait = false;
-                    playerChange();
-                    // freeSpace===nullの場合、どちらもとれず終了
-                });
-            }else if( player === PLAYER_COMP ) think();
-        };
-    
-        const putPiece = pos => {
-            clickSetsWait=true;
-            gameData.clickSets( pos[0] ,pos[1] , player ,
-                     result => controlCtrl.result(result)
-                ).then( result => {
-                            controlCtrl.result(result);
-                            clickSetsWait=false;
-                            playerChange();
-                        }
-                );
-    
-        };
-    
-        const gameScreen =  makeGameBord( "reversi" );
-        const messageCtrl =  getMessageControler( gameScreen.message );
-        messageCtrl.message("開始ボタンを押してください");
-    
-        const controlCtrl =  getControlControler( gameScreen.control,
-            ()=>{
-                if( passWait || clickSetsWait ) return;
-                if( running && !confirm("最初から始めますか？")) return;
-                gameData.reset();
-                gameData.pieceSet( 3 , 3 , PLAYER_COMP ).pieceSet( 4 , 4 , PLAYER_COMP )
-                    .pieceSet( 4 , 3 , PLAYER_YOU ).pieceSet( 3 , 4 , PLAYER_YOU );
-                controlCtrl.result(gameData.result());
-                running=true;
-                player = PLAYER_YOU;
-                messageCtrl.turnMessage(player);
-                freeSpace = gameData.getFreePlaces(player);
-            });
-    
-        const think = async () =>{
-    
-            const pos = gameData.compThink();
-            await wait( 1000 );
-            putPiece(pos);
-    
-        };
-    
-        const gameData = getGameDataManager(
-            getMakeDrawingControler( gameScreen.bord.canvas,
-                ( pos )=>{
-                    if( passWait || !running || player === PLAYER_COMP || clickSetsWait) return;
-    
-                    const [col,row] = pos;
-                    if( freeSpace.some( e => e[0] === col && e[1] === row ) ) putPiece(pos);
-    
-                }
-            )
-        );
-    
     });
-})();
+    }
+)();
